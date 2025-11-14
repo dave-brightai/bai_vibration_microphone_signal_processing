@@ -2,7 +2,7 @@
 
 A comprehensive Python toolkit for analyzing audio and vibration sensor data through spectrogram visualization, video generation, and S3-based data processing. Designed for acoustic anomaly detection and analysis of industrial gas sensor and vibration monitoring applications.
 
-If you are new to this repo, the suggest you first run these scripts locally to understand what we are doing. 
+If you are new to this repo, I suggest you first run these scripts locally to understand what we are doing. 
 
 ```
 play_audio_with_spectrogram.py audio_file.wav
