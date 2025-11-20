@@ -333,8 +333,6 @@ def iter_sources(
     s3_uris_file: Optional[str],
     s3_prefix: Optional[str],
     s3_synthesize: Optional[str],
-    synth_start: str,
-    synth_end: str,
     synth_step: int,
     aws_profile: Optional[str],
 ) -> list[str]:
@@ -348,12 +346,12 @@ def iter_sources(
         print(f"Listing via cloudpathlib rglob: {s3_prefix}")
         out.extend(list_s3_files_cloudpath(s3_prefix, aws_profile, pattern="*.log.gz"))
     if s3_synthesize:
-        print(f"Synthesizing S3 keys under: {s3_synthesize}  [{synth_start}..{synth_end} step {synth_step}s]")
+        print(f"Synthesizing S3 keys under: {s3_synthesize}  [00:00:00..23:59:59 step {synth_step}s]")
         out.extend(
             synthesize_s3_files(
                 s3_synthesize,
-                start_time=synth_start,
-                end_time=synth_end,
+                start_time="00:00:00",
+                end_time="23:59:59",
                 step_seconds=synth_step,
                 aws_profile=aws_profile,
                 suffix=".log.gz",
@@ -369,8 +367,6 @@ def main(
     s3_uris_file: Optional[str],
     s3_prefix: Optional[str],
     s3_synthesize: Optional[str],
-    synth_start: str,
-    synth_end: str,
     synth_step: int,
     aws_profile: Optional[str],
     output_dir: str,
@@ -384,14 +380,36 @@ def main(
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
+    start_ts: Optional[str] = None,
+    end_ts: Optional[str] = None,
     mp_ctx=None,
 ) -> None:
     file_list = iter_sources(
         files_glob, s3_uris, s3_uris_file, s3_prefix,
-        s3_synthesize, synth_start, synth_end, synth_step, aws_profile
+        s3_synthesize, synth_step, aws_profile
     )
     if not file_list:
         raise SystemExit("No input files provided.")
+
+    # Filter by timestamp if requested
+    if start_ts or end_ts:
+        from utils import _parse_compact_ts, _parse_ts_from_basename
+        start_dt = _parse_compact_ts(start_ts)
+        end_dt = _parse_compact_ts(end_ts)
+        print(f"Filtering files by timestamp: start={start_dt}, end={end_dt}")
+        
+        filtered = []
+        for fn in file_list:
+            ts = _parse_ts_from_basename(fn)
+            if ts is None:
+                continue
+            if start_dt is not None and ts < start_dt:
+                continue
+            if end_dt is not None and ts > end_dt:
+                continue
+            filtered.append(fn)
+        file_list = filtered
+        print(f"After filtering: {len(file_list)} files")
 
     cpu_n = os.cpu_count() or 1
     workers = max(1, min(workers, cpu_n))
@@ -499,9 +517,11 @@ if __name__ == "__main__":
 
     synth = ap.add_argument_group("Synthesize options (no ListBucket needed)")
     synth.add_argument("--s3-synthesize", help="S3 prefix that ENDS with YYYYMMDD/; probes keys with HeadObject.")
-    synth.add_argument("--start-time", default="00:00:00", help="HH:MM:SS (default: 00:00:00)")
-    synth.add_argument("--end-time",   default="23:59:59", help="HH:MM:SS (default: 23:59:59)")
     synth.add_argument("--step-seconds", type=int, default=60, help="Step in seconds between keys (default: 60)")
+
+    filt = ap.add_argument_group("Time filtering")
+    filt.add_argument("--start-ts", default=None, help="Compact datetime YYYYMMDDHHMMSS")
+    filt.add_argument("--end-ts", default=None, help="Compact datetime YYYYMMDDHHMMSS")
 
     aws = ap.add_argument_group("AWS")
     aws.add_argument("--aws-profile", help="AWS profile for S3 access")
@@ -535,8 +555,6 @@ if __name__ == "__main__":
         s3_uris_file=args.s3_uris_file,
         s3_prefix=args.s3_prefix,               # cloudpathlib rglob
         s3_synthesize=args.s3_synthesize,       # HeadObject probing (no ListBucket)
-        synth_start=args.start_time,
-        synth_end=args.end_time,
         synth_step=args.step_seconds,
         aws_profile=args.aws_profile,
         output_dir=args.output_dir,
@@ -550,5 +568,7 @@ if __name__ == "__main__":
         cmap=args.cmap,
         vmin=args.vmin,
         vmax=args.vmax,
+        start_ts=args.start_ts,
+        end_ts=args.end_ts,
         mp_ctx=mp_ctx,
     )
