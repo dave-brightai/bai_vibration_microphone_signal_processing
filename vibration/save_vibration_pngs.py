@@ -268,6 +268,22 @@ def process_one(
 ):
     tmpdir: Optional[Path] = None
     try:
+        out_dir = Path(output_dir)
+        base = double_ext_stem(fn)
+        
+        # Check if outputs already exist
+        time_path = out_dir / f"{base}.png"
+        spec_path = out_dir / f"{base}_spec.png"
+        
+        time_exists = time_path.exists() if make_time else False
+        spec_exists = spec_path.exists() if make_spectro else False
+        
+        # Skip if all requested outputs already exist
+        if (not make_time or time_exists) and (not make_spectro or spec_exists):
+            print(f"[skip] PNG(s) already exist, skipping: {fn}")
+            return (fn, time_path.name if time_exists else None, spec_path.name if spec_exists else None)
+        
+        # Process the file
         local_path, tmpdir = resolve_to_local(fn, aws_profile)
         data_obj = DataLoader(local_path)
 
@@ -282,16 +298,20 @@ def process_one(
 
         n = vib_data.shape[0]
         t = load_time_vector(fs, vib_ts, n)
-        out_dir = Path(output_dir)
 
         time_out = spec_out = None
-        if make_time:
+        if make_time and not time_exists:
             time_out = save_time_domain_png(fn, vib_data, t, fs, out_dir, dpi)
-        if make_spectro and fs:
+        elif time_exists:
+            time_out = time_path
+            
+        if make_spectro and not spec_exists and fs:
             spec_out = save_spectrogram_png(
                 fn, vib_data, float(fs), out_dir, dpi,
                 nperseg, noverlap, cmap, vmin, vmax
             )
+        elif spec_exists:
+            spec_out = spec_path
 
         del vib_data, t, data_obj
         return (fn, Path(time_out).name if time_out else None, Path(spec_out).name if spec_out else None)
