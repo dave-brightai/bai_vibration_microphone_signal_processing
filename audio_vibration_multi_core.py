@@ -38,7 +38,7 @@ import matplotlib
 matplotlib.use("Agg")  # belt-and-suspenders
 
 # ---- Standard imports ----
-import os
+import os, sys
 import re
 import fnmatch
 import posixpath
@@ -62,6 +62,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from concurrent.futures.process import BrokenProcessPool
 
 # Import common utilities
+# Import common utilities
 from utils import (
     parse_s3_uri,
     _parse_s3_uri_for_prefix,
@@ -71,6 +72,7 @@ from utils import (
     read_wav_from_s3,
     get_vibration_data,
     _parse_ts_from_basename,
+    _parse_compact_ts,
     _intervals_from_files,
     _overlap,
     find_sensor_overlaps,
