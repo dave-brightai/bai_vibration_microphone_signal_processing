@@ -27,6 +27,9 @@ from pathlib import Path
 from glob import glob
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import numpy as np
 import soundfile as sf
 import matplotlib
@@ -34,6 +37,8 @@ matplotlib.use("Agg")  # ensure headless backend in subprocesses
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram
 
+# Import common utilities
+from utils import read_n_remove, plot_spectrogram_and_save
 
 # -------------------- Argparse --------------------
 
@@ -43,7 +48,7 @@ parser.add_argument("--output-dir", required=True, type=str, help="Directory to 
 parser.add_argument("--k", type=int, default=20, help="Number of initial samples to drop from each signal.")
 parser.add_argument("--nperseg", type=int, default=1024, help="STFT window length (samples).")
 parser.add_argument("--noverlap", type=int, default=512, help="STFT overlap (samples).")
-parser.add_argument("--nfft", type=int, default=1024, help="FFT size.")
+parser.add_argument("--nfft", type=int, default=4096, help="FFT size.")
 parser.add_argument("--dpi", type=int, default=300, help="Output PNG DPI.")
 parser.add_argument("--vmin", type=float, default=-15, help="Minimum dB value for color scale (optional).")
 parser.add_argument("--vmax", type=float, default=-60, help="Maximum dB value for color scale (optional).")
@@ -58,54 +63,7 @@ for arg, val in vars(args).items():
 
 # -------------------- Helper functions --------------------
 
-def read_n_remove(fn: str, k: int = 20):
-    """Read a WAV file and drop the first k samples."""
-    x, fs = sf.read(fn, always_2d=True)
-    if x.shape[1] > 1:
-        x = x.mean(axis=1)  # convert to mono
-    else:
-        x = x[:, 0]
-    if k > 0 and k < len(x):
-        x = x[k:]
-    return x.astype(np.float32, copy=False), fs
-
-
-def plot_spectrogram_and_save(
-    x: np.ndarray,
-    fs: float,
-    out_png: Path,
-    nperseg: int = 1024,
-    noverlap: int = 512,
-    nfft: int = 1024,
-    dpi: int = 300,
-    title: str | None = None,
-    vmin: float | None = None,
-    vmax: float | None = None,
-):
-    """Compute and save a spectrogram as PNG."""
-    f, t, Sxx = spectrogram(
-        x, fs=fs, nperseg=nperseg, noverlap=noverlap, nfft=nfft,
-        scaling="spectrum", mode="magnitude"
-    )
-
-    eps = np.finfo(np.float32).eps
-    Sxx_db = 10.0 * np.log10(Sxx + eps)  # (kept as-is to match your current behavior)
-
-    plt.figure(figsize=(10, 4))
-    plt.pcolormesh(t, f, Sxx_db, shading="gouraud", vmin=vmin, vmax=vmax)
-    plt.ylabel("Frequency [Hz]")
-    plt.xlabel("Time [s]")
-    if title:
-        plt.title(title)
-    cbar = plt.colorbar()
-    cbar.set_label("Intensity [dB]")
-    plt.ylim(0, fs / 2.0)
-    plt.tight_layout()
-
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_png, dpi=dpi)
-    plt.close()
-
+# read_n_remove and plot_spectrogram_and_save moved to utils.py
 
 def find_wavs_recursive(root_dir: Path):
     """Recursively find all .wav files."""

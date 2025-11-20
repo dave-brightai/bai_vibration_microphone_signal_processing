@@ -20,6 +20,7 @@ _os.environ.setdefault("MKL_NUM_THREADS", "1")
 _os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import os
+import sys
 import shutil
 import tempfile
 from glob import glob
@@ -27,6 +28,9 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 import matplotlib
@@ -38,6 +42,12 @@ from cloudpathlib import CloudPath, S3Client
 
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from concurrent.futures.process import BrokenProcessPool
+
+# Import common utilities
+from utils import parse_s3_uri
+
+# Import dataloader from misc folder
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'misc'))
 from dataloader import DataLoader  # type: ignore
 
 eps = 1e-9
@@ -66,12 +76,7 @@ def _worker_initializer(core_hint: Optional[int] = None):
 
 
 # ---------- S3 helpers ----------
-def parse_s3_uri(uri: str) -> Tuple[str, str]:
-    p = urlparse(uri)
-    if p.scheme != "s3" or not p.netloc or not p.path:
-        raise ValueError(f"Bad S3 URI: {uri}")
-    return p.netloc, p.path.lstrip("/")
-
+# parse_s3_uri moved to utils.py
 
 def list_s3_files_cloudpath(prefix_uri: str, aws_profile: Optional[str] = None, pattern: str = "*.log.gz") -> list[str]:
     """
@@ -520,8 +525,8 @@ if __name__ == "__main__":
     spec.add_argument("--spectrogram", dest="make_spectro", action="store_true", help="Enable spectrogram plots (default).")
     spec.add_argument("--no-spectrogram", dest="make_spectro", action="store_false", help="Disable spectrogram plots.")
     spec.set_defaults(make_spectro=True)
-    spec.add_argument("--nperseg", type=int, default=1024)
-    spec.add_argument("--noverlap", type=int, default=512)
+    spec.add_argument("--nperseg", type=int, default=4096)
+    spec.add_argument("--noverlap", type=int, default=3585)
     spec.add_argument("--nfft", type=int, default=None)
     spec.add_argument("--cmap", type=str, default="viridis")
     spec.add_argument("--vmin", type=float, default=-80.0)

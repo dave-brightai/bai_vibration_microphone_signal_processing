@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
 """
-Fast PNG frame renderer for a WAV spectrogram with a moving red playhead,
-then muxes frames + audio into an MP4 via ffmpeg.
+Fast PNG frame renderer for a VIBRATION spectrogram (from .log.gz via DataLoader)
+with a moving red playhead, then muxes frames + audio into an MP4 via ffmpeg.
 
 Example:
-  python make_mp4_microphone.py input.wav \
+  python make_vibration_mp4.py input.log.gz \
+    --channel 0 \
     --frame-dir ./frames_out --fps 30 \
     --nperseg 1024 --noverlap 512 --width 1280 --height 720 \
     --png-compress-level 1 --line-width 3 \
-    --output out.mp4 \
     --ffmpeg-pad-even \
-    --adelay-ms 1200 --volume 5.0 --audio-ss 2.2
+    --adelay-ms 0 --audio-ss 0.0 \
+    --normalize --volume 2.0
 """
 
-from email.mime import base
+from __future__ import annotations
+
 import os
+import sys
 import time
 import argparse
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
+from typing import Tuple
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
@@ -31,28 +41,24 @@ from matplotlib import cm
 
 from PIL import Image, ImageDraw
 
+# Import common utilities
+from utils import estimate_output_latency
 
-def estimate_output_latency(fs: int, channels: int, mode: str) -> float:
-    try:
-        return float(mode)
-    except ValueError:
-        pass
-    if mode == "device":
-        out_dev = sd.default.device[1]
-        dev_info = sd.query_devices(out_dev)
-        return float(dev_info.get("default_low_output_latency", 0.0))
-    if mode == "auto":
-        stream = sd.OutputStream(samplerate=fs, channels=channels)
-        stream.start()
-        try:
-            lat = stream.latency[1] if isinstance(stream.latency, (list, tuple)) else float(stream.latency)
-        finally:
-            stream.stop(); stream.close()
-        return float(lat)
-    return 0.0
+# Import dataloader from misc folder
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'misc'))
+from dataloader import DataLoader  # type: ignore
 
+# --------------------------- Latency helper --------------------------- #
+
+# estimate_output_latency moved to utils.py
+
+# ----------------------- Colormap helper ------------------------------ #
 
 def colormap_rgba_uint8(S_db: np.ndarray, vmin: float, vmax: float, cmap_name: str) -> np.ndarray:
+    """
+    Map a (F,T) dB spectrogram to uint8 RGBA image using a Matplotlib colormap.
+    Low freqs are at the bottom of the returned image.
+    """
     norm = (S_db - vmin) / (vmax - vmin + 1e-12)
     norm = np.clip(norm, 0.0, 1.0)
     lut = (cm.get_cmap(cmap_name, 256)(np.linspace(0, 1, 256)) * 255.0).astype(np.uint8)  # (256,4)
@@ -61,30 +67,100 @@ def colormap_rgba_uint8(S_db: np.ndarray, vmin: float, vmax: float, cmap_name: s
     return rgba[::-1, :, :]  # flip vertical so low freqs at bottom
 
 
-def save_frames(args):
-    # ---- Load audio window ----
-    data, fs = sf.read(args.wav, always_2d=True)
-    n_samples, n_channels = data.shape
+# ----------------------- Vibration loader ----------------------------- #
 
-    start_samp = int(max(args.start, 0.0) * fs)
-    if start_samp >= n_samples:
-        raise ValueError("Start time is beyond end of file.")
-    end_samp = n_samples if args.duration <= 0 else min(n_samples, start_samp + int(args.duration * fs))
-    data = data[start_samp:end_samp, :]
-    duration = (end_samp - start_samp) / fs
-    if duration <= 0:
-        raise ValueError("No audio to process after start/duration.")
+def load_vibration_segment(
+    log_path: Path,
+    channel: int,
+    start: float,
+    duration: float,
+    normalize: bool,
+    volume: float,
+) -> Tuple[np.ndarray, int, float]:
+    """
+    Load vibration channel from .log.gz via DataLoader, apply start/duration,
+    optional normalization, and volume scaling.
+
+    Returns:
+      signal: np.ndarray, shape (N,) float32 in [-1,1] (clipped)
+      fs:     sample rate (Hz) as int
+      dur_s:  duration in seconds
+    """
+    dl = DataLoader(log_path)
+
+    vib = dl.vibration_array  # shape (N, num_channels)
+    if vib.size == 0:
+        raise ValueError("No vibration data parsed from the log.")
+
+    if channel < 0 or channel >= vib.shape[1]:
+        raise ValueError(f"--channel {channel} out of range; file has {vib.shape[1]} channel(s).")
+
+    fs = int(getattr(dl.vibration_device, "sample_rate", 25600))
+
+    total_samples = vib.shape[0]
+    start_samp = int(max(start, 0.0) * fs)
+    if start_samp >= total_samples:
+        raise ValueError("Start time is beyond the end of the vibration signal.")
+
+    if duration is not None and duration > 0:
+        end_samp = min(total_samples, start_samp + int(duration * fs))
+    else:
+        end_samp = total_samples
+
+    # Mono channel
+    data = vib[start_samp:end_samp, channel].astype(np.float32, copy=False)
+
+    if data.size == 0:
+        raise ValueError("No data left after applying start/duration.")
+
+    # Normalize (before volume)
+    if normalize:
+        peak = float(np.max(np.abs(data)))
+        if peak > 0:
+            data = data / peak
+
+    if volume != 1.0:
+        data = np.clip(data * volume, -1.0, 1.0)
+
+    dur_s = len(data) / float(fs)
+    if dur_s <= 0:
+        raise ValueError("Computed duration <= 0 after preprocessing.")
+
+    return data, fs, dur_s
+
+
+# ------------------------ Frame saver -------------------------------- #
+
+def save_frames(args) -> Tuple[int, int, int, float, int, np.ndarray]:
+    """
+    Load vibration, compute spectrogram, and render PNG frames with moving playhead.
+
+    Returns:
+      out_w, out_h, n_frames, duration, fs, signal_segment
+    """
+    # ---- Load vibration window ----
+    signal, fs, duration = load_vibration_segment(
+        log_path=Path(args.log),
+        channel=args.channel,
+        start=args.start,
+        duration=args.duration,
+        normalize=args.normalize,
+        volume=args.volume,
+    )
 
     # ---- Spectrogram (mono) ----
-    mono = data[:, 0]
     f, t, Sxx = spectrogram(
-        mono, fs=fs, nperseg=args.nperseg, noverlap=args.noverlap,
-        scaling="spectrum", mode="magnitude"
+        signal,
+        fs=fs,
+        nperseg=args.nperseg,
+        noverlap=args.noverlap,
+        scaling="spectrum",
+        mode="magnitude",
     )
     Sxx_db = 10.0 * np.log10(Sxx + np.finfo(float).eps)
 
     # ---- Latency compensation for the playhead (visual only) ----
-    out_latency = estimate_output_latency(fs, n_channels, args.latency)
+    out_latency = estimate_output_latency(fs, 1, args.latency)
     stft_center_delay = args.nperseg / (2.0 * fs)
     total_left_shift = out_latency + stft_center_delay + args.extra_fudge
     print(f"[INFO] Output latency: {out_latency:.6f}s | STFT delay: {stft_center_delay:.6f}s "
@@ -103,7 +179,7 @@ def save_frames(args):
     if (out_w, out_h) != (W_src, H_src):
         base_img = base_img.resize(
             (out_w, out_h),
-            resample=(Image.BILINEAR if args.smooth_resize else Image.NEAREST)
+            resample=(Image.BILINEAR if args.smooth_resize else Image.NEAREST),
         )
 
     os.makedirs(args.frame_dir, exist_ok=True)
@@ -137,10 +213,12 @@ def save_frames(args):
             print(f"[INFO] Saved {i+1}/{n_frames} (~{rate:.1f} fps save rate, elapsed {elapsed:.1f}s)")
 
     print(f"[DONE] Wrote {n_frames} frames to: {args.frame_dir}")
-    return out_w, out_h, n_frames, duration
+    return out_w, out_h, n_frames, duration, fs, signal
 
 
-def build_and_run_ffmpeg(args, frame_w, frame_h):
+# ------------------------ FFMPEG mux --------------------------------- #
+
+def build_and_run_ffmpeg(args, frame_w: int, frame_h: int, wav_path: str) -> None:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg not found in PATH.")
@@ -154,7 +232,7 @@ def build_and_run_ffmpeg(args, frame_w, frame_h):
 
     vfilter_str = ",".join(vfilters) if vfilters else None
 
-    # Audio filter chain
+    # Audio filter chain (no volume here; we already scaled the signal)
     afilters = []
     if args.audio_ss is not None and args.audio_ss > 0:
         # Trim the audio start by N seconds (advance audio earlier)
@@ -162,8 +240,6 @@ def build_and_run_ffmpeg(args, frame_w, frame_h):
     if args.adelay_ms and args.adelay_ms > 0:
         # Delay audio by N ms (push later); use '|...' for stereo safety
         afilters.append(f"adelay={args.adelay_ms}|{args.adelay_ms}")
-    if args.volume and args.volume != 1.0:
-        afilters.append(f"volume={args.volume}")
 
     afilter_str = ",".join(afilters) if afilters else None
 
@@ -173,7 +249,7 @@ def build_and_run_ffmpeg(args, frame_w, frame_h):
         ffmpeg,
         "-framerate", str(args.fps),
         "-i", frames_pattern,
-        "-i", args.wav,
+        "-i", wav_path,
         "-c:v", args.vcodec,
         "-pix_fmt", args.pix_fmt,
         "-c:a", args.acodec, "-b:a", args.abitrate,
@@ -193,19 +269,33 @@ def build_and_run_ffmpeg(args, frame_w, frame_h):
     print(f"[DONE] Muxed video: {args.output}")
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Render spectrogram frames and mux with ffmpeg")
-    # Inputs/frames
-    p.add_argument("wav", type=str, help="Path to WAV (or any libsndfile-readable audio)")
+# ----------------------------- CLI ----------------------------------- #
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Render spectrogram frames from vibration (.log.gz via DataLoader) and mux with ffmpeg."
+    )
+
+    # Input log
+    p.add_argument("log", type=str, help="Path to .log.gz file")
+
+    # Vibration channel & window
+    p.add_argument("--channel", type=int, default=0, help="Vibration channel index (0-based)")
+    p.add_argument("--start", type=float, default=0.0, help="Start time (s) within the vibration signal")
+    p.add_argument("--duration", type=float, default=-1.0, help="Duration (s, -1 = full file)")
+
+    # Signal prep
+    p.add_argument("--normalize", action="store_true", help="Normalize signal to full scale before --volume")
+    p.add_argument("--volume", type=float, default=1.0, help="Signal gain multiplier before writing WAV")
+
+    # Frames / spectrogram
     p.add_argument("--frame-dir", required=True, type=str, help="Directory to save PNG frames")
     p.add_argument("--fps", type=int, default=30, help="Frames per second")
     p.add_argument("--vmin", type=float, default=-60.0, help="Spectrogram min dB")
-    p.add_argument("--vmax", type=float, default=-15.0, help="Spectrogram max dB")
+    p.add_argument("--vmax", type=float, default=-20.0, help="Spectrogram max dB")
     p.add_argument("--cmap", type=str, default="viridis", help="Matplotlib colormap name")
-    p.add_argument("--nperseg", type=int, default=1024, help="STFT window size")
-    p.add_argument("--noverlap", type=int, default=512, help="STFT overlap")
-    p.add_argument("--start", type=float, default=0.0, help="Start time (s) within the WAV")
-    p.add_argument("--duration", type=float, default=-1.0, help="Duration (s, -1 = full file)")
+    p.add_argument("--nperseg", type=int, default=4096, help="STFT window size")
+    p.add_argument("--noverlap", type=int, default=3585, help="STFT overlap")
 
     # Output size
     p.add_argument("--width", type=int, default=None, help="Output width in px (default: spectrogram width)")
@@ -217,8 +307,8 @@ def parse_args():
     p.add_argument("--png-compress-level", type=int, default=1, help="PNG compression level 0–9 (lower is faster)")
 
     # Latency (visual alignment while generating frames)
-    p.add_argument("--latency", type=str, default=0,#"1.2",
-                   help="Latency mode: 'auto', 'device', or a float in seconds.")
+    p.add_argument("--latency", type=str, default="0",
+                   help="Latency mode: 'auto', 'device', or a float in seconds (default '0').")
     p.add_argument("--extra-fudge", type=float, default=0.0,
                    help="Extra manual offset (seconds) subtracted from cursor time.")
 
@@ -232,23 +322,34 @@ def parse_args():
     p.add_argument("--ffmpeg-pad-even", action="store_true", help="Pad to even width/height (adds border)")
     p.add_argument("--ffmpeg-scale-even", action="store_true", help="Scale down 1px if needed to make even")
 
-    # Audio alignment/tweaks
+    # Audio alignment tweaks (on final mux)
     p.add_argument("--adelay-ms", type=int, default=0,
-                   help="Delay audio by N ms (adds silence before start). Use 1200 for 1.2s.")
+                   help="Delay audio by N ms (adds silence before start).")
     p.add_argument("--audio-ss", type=float, default=None,
                    help="Trim audio start by N seconds (advance audio earlier).")
-    p.add_argument("--volume", type=float, default=5.0,
-                   help="Audio gain multiplier (e.g., 2.0 is +6 dB).")
 
     return p.parse_args()
 
 
-if __name__ == "__main__":
+# ----------------------------- Main ---------------------------------- #
+
+def main() -> None:
     args = parse_args()
-    w, h, n_frames, dur = save_frames(args)
-    basename = os.path.basename(args.wav)
-    output = f"{os.path.splitext(basename)[0]}.mp4"
+
+    # Render frames and get the exact signal + fs used
+    w, h, n_frames, dur, fs, signal = save_frames(args)
+
+    # Choose default output name from log basename
+    basename = os.path.basename(args.log)
+    stem = os.path.splitext(os.path.splitext(basename)[0])[0]  # handle .log.gz
+    output = f"{stem}.mp4"
     args.output = output
+
+    # Write temporary WAV for ffmpeg
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        wav_path = tmp.name
+    print(f"[INFO] Writing temporary WAV: {wav_path}")
+    sf.write(wav_path, signal, fs)
 
     # Auto-protect: if neither pad-even nor scale-even chosen and dims are odd,
     # default to padding to avoid x264 errors with yuv420p.
@@ -258,4 +359,16 @@ if __name__ == "__main__":
                   "Falling back to --ffmpeg-pad-even.")
             args.ffmpeg_pad_even = True
 
-    build_and_run_ffmpeg(args, w, h)
+    try:
+        build_and_run_ffmpeg(args, w, h, wav_path)
+    finally:
+        # Clean up temp WAV
+        try:
+            os.remove(wav_path)
+            print(f"[INFO] Removed temporary WAV: {wav_path}")
+        except OSError:
+            print(f"[WARN] Could not remove temporary WAV: {wav_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -57,253 +57,36 @@ import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram
-
-# Your existing dataloader
-from dataloader import DataLoader  # type: ignore
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from concurrent.futures.process import BrokenProcessPool
+
+# Import common utilities
+from utils import (
+    parse_s3_uri,
+    _parse_s3_uri_for_prefix,
+    _make_matcher,
+    list_s3_files_fast,
+    resolve_to_local,
+    read_wav_from_s3,
+    get_vibration_data,
+    _parse_ts_from_basename,
+    _intervals_from_files,
+    _overlap,
+    find_sensor_overlaps,
+    save_vib_and_audio_spectrograms_png,
+)
+
+# Import dataloader from misc folder
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'misc'))
+from dataloader import DataLoader  # type: ignore
 
 # -------------------- config defaults --------------------
 AWS_PROFILE_DEFAULT = "bai-mgmt-gbl-sandbox-developer"
 VIB_PATTERN_DEFAULT = "*.log.gz"
 AUD_PATTERN_DEFAULT = "*.wav"
 
-# -------------------- small utils --------------------
-def parse_s3_uri(uri: str) -> Tuple[str, str]:
-    p = urlparse(uri)
-    if p.scheme != "s3" or not p.netloc or not p.path:
-        raise ValueError(f"Bad S3 URI: {uri}")
-    return p.netloc, p.path.lstrip("/")
-
-def _parse_s3_uri_for_prefix(uri: str) -> tuple[str, str]:
-    p = urlparse(uri)
-    if p.scheme != "s3" or not p.netloc:
-        raise ValueError(f"Bad S3 URI: {uri}")
-    prefix = p.path.lstrip("/")
-    if prefix and not prefix.endswith("/"):
-        prefix += "/"
-    return p.netloc, prefix
-
-def _make_matcher(pattern: str, base_only: bool = True):
-    # optimize common suffix patterns (*.ext, *_suffix)
-    if not any(c in pattern for c in "?*["):
-        return (lambda key: posixpath.basename(key) == pattern) if base_only else (lambda key: key.endswith(pattern))
-    if pattern.startswith("*.") or pattern.startswith("*_"):
-        suffix = pattern[1:]
-        return (lambda key: posixpath.basename(key).endswith(suffix)) if base_only else (lambda key: key.endswith(suffix))
-    return (lambda key: fnmatch.fnmatch(posixpath.basename(key), pattern)) if base_only else (lambda key: fnmatch.fnmatch(key, pattern))
-
-# -------------------- S3 helpers --------------------
-def list_s3_files_fast(
-    prefix_uri: str,
-    *,
-    aws_profile: Optional[str] = None,
-    pattern: str = "*",
-    match_on_basename: bool = True,
-    page_size: int = 1000,
-) -> List[str]:
-    """Recursive listing via ListObjectsV2 + client-side filter. Returns s3:// URIs."""
-    bucket, prefix = _parse_s3_uri_for_prefix(prefix_uri)
-    session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-    s3 = session.client("s3", config=Config(max_pool_connections=50, retries={"max_attempts": 10}))
-    paginator = s3.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=bucket, Prefix=prefix, PaginationConfig={"PageSize": page_size})
-    match = _make_matcher(pattern, base_only=match_on_basename)
-    out: List[str] = []
-    for page in pages:
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if match(key):
-                out.append(f"s3://{bucket}/{key}")
-    return out
-
-def resolve_to_local(path_like: str, aws_profile: Optional[str] = None) -> Tuple[Path, Optional[Path]]:
-    """Return local file path; download to temp if s3://."""
-    if not path_like.startswith("s3://"):
-        return Path(path_like), None
-    session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-    s3 = session.client("s3", config=Config(max_pool_connections=8, retries={"max_attempts": 10}))
-    bucket, key = parse_s3_uri(path_like)
-    tmpdir = Path(tempfile.mkdtemp(prefix="vib_"))
-    local_path = tmpdir / Path(key).name
-    s3.download_file(bucket, key, str(local_path))
-    return local_path, tmpdir
-
-def read_wav_from_s3(aud_file: str, aws_profile: Optional[str] = None) -> Tuple[np.ndarray, int]:
-    """Download a .wav (or audio) file from S3 and read it using soundfile."""
-    session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-    s3 = session.client("s3", config=Config(max_pool_connections=8, retries={"max_attempts": 10}))
-    bucket, key = parse_s3_uri(aud_file)
-    tmpdir = Path(tempfile.mkdtemp(prefix="aud_"))
-    local_path = tmpdir / Path(key).name
-    try:
-        s3.download_file(bucket, key, str(local_path))
-        data, fs = sf.read(local_path, always_2d=True)
-        return data, fs
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-def get_vibration_data(path_like: str, aws_profile: Optional[str] = None) -> Tuple[np.ndarray, float, Optional[np.ndarray]]:
-    """
-    Load vibration data, sampling rate, and timestamps from local or s3:// path.
-    Returns vib_data [N,C], fs, vib_ts or None
-    """
-    local_path, tmpdir = resolve_to_local(path_like, aws_profile)
-    try:
-        data_obj = DataLoader(local_path)
-        vib = np.asarray(data_obj.vibration_array, dtype=np.float32)
-        if vib.ndim == 1:
-            vib = vib[:, None]
-        fs = getattr(data_obj.vibration_device, "sample_rate", None)
-        if fs is None:
-            raise AttributeError("Could not find sample_rate inside vibration_device.")
-        vib_ts = getattr(data_obj, "vibration_ts", None)
-        return vib, float(fs), vib_ts
-    finally:
-        if tmpdir and tmpdir.exists():
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-# -------------------- timestamp parsing + overlap --------------------
-_TS_BOTH = re.compile(r"(?P<ts>\d{8}_\d{6}|\d{14})")  # 20250922_165238 or 20250922165238
-
-def _parse_ts_from_basename(path: str) -> datetime:
-    base = path.rsplit("/", 1)[-1]
-    m = _TS_BOTH.search(base)
-    if not m:
-        raise ValueError(f"Could not find timestamp in filename: {base}")
-    ts = m.group("ts")
-    fmt = "%Y%m%d_%H%M%S" if "_" in ts else "%Y%m%d%H%M%S"
-    return datetime.strptime(ts, fmt)
-
-def _intervals_from_files(
-    files: Iterable[str],
-    duration_s: float,
-    *,
-    skew_s: float = 0.0,
-) -> List[Tuple[datetime, datetime, str]]:
-    dur = timedelta(seconds=float(duration_s))
-    skew = timedelta(seconds=float(skew_s))
-    out: List[Tuple[datetime, datetime, str]] = []
-    for f in files:
-        try:
-            ts = _parse_ts_from_basename(f)
-        except Exception:
-            continue
-        start = ts - skew
-        end   = ts + dur + skew
-        out.append((start, end, f))
-    out.sort(key=lambda t: t[0])
-    return out
-
-def _overlap(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> bool:
-    return max(a0, b0) < min(a1, b1)
-
-def find_sensor_overlaps(
-    vib_prefix: str,
-    aud_prefix: str,
-    *,
-    aws_profile: Optional[str] = None,
-    vib_pattern: str = VIB_PATTERN_DEFAULT,
-    aud_pattern: str = AUD_PATTERN_DEFAULT,
-    vib_duration_s: float = 119.5,
-    aud_duration_s: float = 30.0,
-    clock_skew_s: float = 1.0,
-) -> List[Tuple[str, str]]:
-    vib_files = list_s3_files_fast(vib_prefix, aws_profile=aws_profile, pattern=vib_pattern)
-    aud_files = list_s3_files_fast(aud_prefix, aws_profile=aws_profile, pattern=aud_pattern)
-    vib_ints = _intervals_from_files(vib_files, vib_duration_s, skew_s=clock_skew_s)
-    aud_ints = _intervals_from_files(aud_files, aud_duration_s, skew_s=clock_skew_s)
-
-    overlaps: List[Tuple[str, str]] = []
-    i = j = 0
-    while i < len(vib_ints) and j < len(aud_ints):
-        v0, v1, vf = vib_ints[i]
-        a0, a1, af = aud_ints[j]
-        if _overlap(v0, v1, a0, a1):
-            overlaps.append((vf, af))
-        if v1 <= a1:
-            i += 1
-        else:
-            j += 1
-    return overlaps
-
-# -------------------- plotting: combined PNG --------------------
-def save_vib_and_audio_spectrograms_png(
-    *,
-    vib_label: str | Path,          # shown in subplot titles (e.g., filename)
-    vib_data: np.ndarray,           # shape [N, C>=1], will use up to 2 channels
-    vib_fs: float,
-    aud_label: str | Path,          # shown in subplot title
-    aud_data: np.ndarray,           # shape [N, C] or [N], will use first channel if multi
-    aud_fs: float,
-    out_png: str | Path,
-    # STFT / plotting params (shared by all three plots)
-    nperseg: int = 1024,
-    noverlap: int = 512,
-    nfft: Optional[int] = None,     # if None, scipy picks default
-    dpi: int = 200,
-    cmap: str = "viridis",
-    vmin: Optional[float] = None,   # e.g., -80.0
-    vmax: Optional[float] = None,   # e.g., -20.0
-) -> Path:
-    """Save a single PNG containing 3 stacked spectrograms: vib ch0, vib ch1 (or ch0), audio."""
-    vib = np.asarray(vib_data, dtype=np.float32)
-    if vib.ndim == 1:
-        vib = vib[:, None]
-    vib_ch0 = vib[:, 0]
-    vib_ch1 = vib[:, 1] if vib.shape[1] > 1 else vib[:, 0]
-
-    aud = np.asarray(aud_data, dtype=np.float32)
-    aud_mono = aud if aud.ndim == 1 else aud[:, 0]
-
-    def _stft_db(x: np.ndarray, fs: float):
-        seg = int(min(nperseg, len(x)))
-        ovl = int(min(noverlap, max(seg - 1, 0)))
-        nfft_use = int(nfft) if nfft is not None else None
-        f, t, Sxx = spectrogram(
-            x, fs=float(fs), nperseg=seg, noverlap=ovl, nfft=nfft_use,
-            scaling="spectrum", mode="magnitude"
-        )
-        Sxx = Sxx.astype(np.float32, copy=False)
-        eps = np.finfo(np.float32).eps
-        Sxx_db = 10.0 * np.log10(Sxx + eps)
-        return t, f, Sxx_db
-
-    t0, f0, Z0 = _stft_db(vib_ch0, vib_fs)
-    t1, f1, Z1 = _stft_db(vib_ch1, vib_fs)
-    ta, fa, Za = _stft_db(aud_mono, aud_fs)
-
-    fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=False, constrained_layout=True)
-
-    m0 = axes[0].pcolormesh(t0, f0, Z0, shading="gouraud", cmap=cmap, vmin=vmin, vmax=vmax)
-    axes[0].set_title(f"{Path(str(vib_label)).name} — Vibration Ch0")
-    axes[0].set_ylabel("Freq [Hz]")
-    axes[0].set_ylim(0, vib_fs / 2)
-
-    m1 = axes[1].pcolormesh(t1, f1, Z1, shading="gouraud", cmap=cmap, vmin=vmin, vmax=vmax)
-    axes[1].set_title(
-        f"{Path(str(vib_label)).name} — Vibration Ch1"
-        if vib.shape[1] > 1 else
-        f"{Path(str(vib_label)).name} — Vibration (Ch0 repeated)"
-    )
-    axes[1].set_ylabel("Freq [Hz]")
-    axes[1].set_ylim(0, vib_fs / 2)
-
-    m2 = axes[2].pcolormesh(ta, fa, Za, shading="gouraud", cmap=cmap, vmin=vmin, vmax=vmax)
-    axes[2].set_title(f"{Path(str(aud_label)).name} — Audio (mono/first)")
-    axes[2].set_ylabel("Freq [Hz]")
-    axes[2].set_xlabel("Time [s]")
-    axes[2].set_ylim(0, aud_fs / 2)
-
-    cbar = fig.colorbar(m2, ax=axes, fraction=0.03, pad=0.02)
-    cbar.set_label("Magnitude [dB]")
-
-    out_png = Path(out_png)
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    return out_png
+# Note: All utility functions moved to utils.py
 
 # -------------------- per-pair worker --------------------
 def _pin_this_process_to_one_core(core_id: Optional[int] = None) -> None:
@@ -373,17 +156,7 @@ def _process_pair(
         print(f"[error] {vib_fn} <-> {aud_fn}: {e}")
         return vib_fn, None
 
-from datetime import datetime
-from typing import Optional
-
-def _parse_compact_ts(s: Optional[str]) -> Optional[datetime]:
-    """
-    Accepts compact datetime string 'YYYYMMDDHHMMSS' and returns a naive datetime.
-    Returns None if s is None or empty.
-    """
-    if not s:
-        return None
-    return datetime.strptime(s, "%Y%m%d%H%M%S")
+# _parse_compact_ts moved to utils.py
 
 #--------------- main (callable) --------------------
 def main(

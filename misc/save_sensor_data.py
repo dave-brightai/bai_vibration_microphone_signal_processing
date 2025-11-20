@@ -45,6 +45,18 @@ import shutil
 import boto3
 from botocore.config import Config
 
+# Import common utilities
+from utils import (
+    parse_s3_uri,
+    _parse_s3_uri_for_prefix,
+    _make_matcher,
+    list_s3_files_fast,
+    _parse_ts_from_basename,
+    _intervals_from_files,
+    _overlap,
+    find_sensor_overlaps,
+)
+
 # -------------------- config defaults --------------------
 AWS_PROFILE_DEFAULT = "bai-mgmt-gbl-sandbox-developer"
 VIB_PATTERN_DEFAULT = "*.log.gz"
@@ -56,48 +68,7 @@ CLOCK_SKEW_DEFAULT = 1.0      # seconds
 
 
 # -------------------- small utils --------------------
-def parse_s3_uri(uri: str) -> Tuple[str, str]:
-    """Split s3://bucket/key into (bucket, key)."""
-    p = urlparse(uri)
-    if p.scheme != "s3" or not p.netloc or not p.path:
-        raise ValueError(f"Bad S3 URI: {uri}")
-    return p.netloc, p.path.lstrip("/")
-
-
-def _parse_s3_uri_for_prefix(uri: str) -> tuple[str, str]:
-    """Return (bucket, prefix) ensuring prefix ends with '/' if non-empty."""
-    p = urlparse(uri)
-    if p.scheme != "s3" or not p.netloc:
-        raise ValueError(f"Bad S3 URI: {uri}")
-    prefix = p.path.lstrip("/")
-    if prefix and not prefix.endswith("/"):
-        prefix += "/"
-    return p.netloc, prefix
-
-
-def _make_matcher(pattern: str, base_only: bool = True):
-    """Return a callable(key) -> bool that matches the given pattern."""
-    if not any(c in pattern for c in "?*["):
-        # No wildcards -> exact match
-        return (
-            (lambda key: posixpath.basename(key) == pattern)
-            if base_only
-            else (lambda key: key.endswith(pattern))
-        )
-
-    if pattern.startswith("*.") or pattern.startswith("*_"):
-        suffix = pattern[1:]
-        return (
-            (lambda key: posixpath.basename(key).endswith(suffix))
-            if base_only
-            else (lambda key: key.endswith(suffix))
-        )
-
-    return (
-        (lambda key: fnmatch.fnmatch(posixpath.basename(key), pattern))
-        if base_only
-        else (lambda key: fnmatch.fnmatch(key, pattern))
-    )
+# Utility functions moved to utils.py
 
 
 # -------------------- S3 helpers --------------------

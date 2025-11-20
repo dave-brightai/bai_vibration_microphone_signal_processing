@@ -12,9 +12,13 @@ Example:
 from __future__ import annotations
 
 import os
+import sys
 import time
 import argparse
 from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 import sounddevice as sd
@@ -22,43 +26,16 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.signal import spectrogram
 
-# Import your loader (must be in same directory or on PYTHONPATH)
-from dataloader import DataLoader  # type: ignore
+# Import common utilities
+from utils import estimate_output_latency
 
+# Import dataloader from misc folder
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'misc'))
+from dataloader import DataLoader  # type: ignore
 
 # --------------------------- Latency helper --------------------------- #
 
-def estimate_output_latency(fs: int, channels: int, mode: str) -> float:
-    """
-    Estimate output latency in seconds.
-
-    mode:
-      - 'auto': open an OutputStream and read stream.latency[1]
-      - 'device': use device's reported default_low_output_latency
-      - float (as string): parse directly (e.g., '0.035')
-    """
-    try:
-        return float(mode)
-    except ValueError:
-        pass
-
-    if mode == "device":
-        out_dev = sd.default.device[1]
-        dev_info = sd.query_devices(out_dev)
-        return float(dev_info.get("default_low_output_latency", 0.0))
-
-    if mode == "auto":
-        stream = sd.OutputStream(samplerate=fs, channels=channels)
-        stream.start()
-        try:
-            lat = stream.latency[1] if isinstance(stream.latency, (list, tuple)) else float(stream.latency)
-        finally:
-            stream.stop()
-            stream.close()
-        return float(lat)
-
-    return 0.0
-
+# estimate_output_latency moved to utils.py
 
 # ---------------------- Playback + spectrogram ------------------------ #
 
@@ -188,8 +165,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--duration", type=float, default=-1.0, help="Play for this many seconds (-1 = full)")
 
     # Spectrogram
-    p.add_argument("--nperseg", type=int, default=1024, help="Spectrogram window size")
-    p.add_argument("--noverlap", type=int, default=512, help="Spectrogram overlap")
+    p.add_argument("--nperseg", type=int, default=4096, help="Spectrogram window size")
+    p.add_argument("--noverlap", type=int, default=3585, help="Spectrogram overlap")
     p.add_argument("--cmap", type=str, default="viridis", help="Colormap for spectrogram")
     p.add_argument("--vmin", type=float, default=-60.0, help="Spectrogram minimum dB value")
     p.add_argument("--vmax", type=float, default=-15.0, help="Spectrogram maximum dB value")
