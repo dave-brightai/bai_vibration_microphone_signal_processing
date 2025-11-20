@@ -2,14 +2,16 @@
 
 A comprehensive Python toolkit for analyzing audio and vibration sensor data through spectrogram visualization, video generation, and S3-based data processing. Designed for acoustic anomaly detection and analysis of industrial gas sensor and vibration monitoring applications.
 
-If you are new to this repo, I suggest you first run these scripts locally to understand what we are doing. 
+## Getting Started
 
-```
-play_audio_with_spectrogram.py audio_file.wav
-```
-and 
-``` 
-play_vibration_with_spectrogram.py vibration_file.log.gz 
+If you are new to this repo, start by running these interactive visualization scripts:
+
+```bash
+# Play audio with real-time spectrogram
+uv run python audio/play_audio_with_spectrogram.py audio_file.wav
+
+# Play vibration data with real-time spectrogram
+uv run python vibration/play_vibration_with_spectrogram.py vibration_file.log.gz
 ```
 
 
@@ -20,15 +22,75 @@ This repository provides tools for processing both audio (microphone) and vibrat
 
 ## Installation
 
+This project uses [uv](https://docs.astral.sh/uv/) for fast, reliable Python package management.
+
+### Install uv (if not already installed)
+
+**macOS/Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Windows:**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**With pip:**
+```bash
+pip install uv
+```
+
+### Setup the Project
+
 1. Clone this repository:
 ```bash
 git clone <repository-url>
 cd bai_vibration_microphone_signal_processing
 ```
 
-2. Install required dependencies:
+2. Create virtual environment and install dependencies:
+```bash
+uv sync
+```
+
+This single command will:
+- Create a virtual environment in `.venv/`
+- Install all dependencies from `pyproject.toml`
+- Generate/update `uv.lock` for reproducible builds
+
+3. Activate the virtual environment:
+```bash
+source .venv/bin/activate  # macOS/Linux
+# or
+.venv\Scripts\activate     # Windows
+```
+
+### Alternative: Traditional pip Installation
+
+If you prefer using pip:
 ```bash
 pip install -r requirements.txt
+```
+
+### Running Scripts with uv
+
+You can run scripts directly with uv without activating the virtual environment:
+```bash
+uv run python audio/play_audio_with_spectrogram.py audio_file.wav
+uv run python vibration/play_vibration_with_spectrogram.py vibration_file.log.gz
+```
+
+### Adding New Dependencies
+
+To add a new package:
+```bash
+uv add package-name
+```
+
+To add a development dependency:
+```bash
+uv add --dev package-name
 ```
 
 ### Key Dependencies
@@ -47,32 +109,91 @@ pip install -r requirements.txt
 
 ```
 bai_vibration_microphone_signal_processing/
-├── audio_vibration_multi_core.py         # Multi-core S3 data processor
-├── audio_vibration_single_core.py        # Single-core S3 data processor
-├── create_spectrogram_pngs_parallelized.py  # Batch audio PNG generator
-├── dataloader.py                         # Vibration sensor data loader
-├── make_mp4_microphone.py                          # Audio video generator
-├── make_mp4_vibration.py                # Vibration video generator
-├── play_audio_with_spectrogram.py             # Audio real-time viewer
-├── play_vibration_with_spectrogram.py   # Vibration real-time viewer
-├── save_sensor_data.py                  # S3 data downloader
-├── save_vibration_pngs.py               # Batch vibration PNG generator
-├── gas2.sh                              # Shell script utilities
-├── requirements.txt                      # Python dependencies
-└── README.md                            # This file
+├── audio/                                # Audio processing modules
+│   ├── create_spectrogram_pngs_parallelized.py  # Batch audio PNG generator
+│   ├── make_mp4_microphone.py            # Audio-to-video converter
+│   └── play_audio_with_spectrogram.py    # Interactive audio viewer
+│
+├── vibration/                            # Vibration processing modules
+│   ├── make_mp4_vibration.py             # Vibration-to-video converter
+│   ├── play_vibration_with_spectrogram.py  # Interactive vibration viewer
+│   └── save_vibration_pngs.py            # Batch vibration PNG generator
+│
+├── misc/                                 # Utilities and experimental code
+│   ├── audio_vibration_single_core.py    # Single-core S3 processor
+│   ├── dataloader.py                     # Vibration data loader
+│   ├── save_sensor_data.py               # S3 data downloader
+│   ├── test_mp4_generation.py            # MP4 generation tests
+│   ├── unit_test.py                      # Unit tests
+│   └── gas2.sh                           # Shell utilities
+│
+├── audio_vibration_multi_core.py         # Multi-core S3 batch processor
+├── utils.py                              # Shared utility functions
+├── pyproject.toml                        # Project configuration (uv)
+├── uv.lock                               # Locked dependencies
+└── requirements.txt                      # Legacy pip dependencies
 ```
 
 ---
 
-## Script Usage & Examples
+## Quick Start Examples
 
-### `play_audio_with_spectrogram.py`
+### Example 1: View Audio with Spectrogram (Local)
+```bash
+# Basic playback
+uv run python audio/play_audio_with_spectrogram.py sample.wav
+
+# With custom settings
+uv run python audio/play_audio_with_spectrogram.py sample.wav \
+    --volume 5 --start 10.0 --duration 30.0 --vmin -60 --vmax -15
+```
+
+### Example 2: View Vibration with Spectrogram (Local)
+```bash
+# Basic playback of channel 0
+uv run python vibration/play_vibration_with_spectrogram.py data.log.gz
+
+# Custom channel and settings
+uv run python vibration/play_vibration_with_spectrogram.py data.log.gz \
+    --channel 0 --volume 2.0 --normalize --start 0 --duration 30
+```
+
+### Example 3: Generate Audio Video
+```bash
+uv run python audio/make_mp4_microphone.py sample.wav \
+    --frame-dir ./frames --fps 30 --volume 5 --width 1920 --height 1080
+```
+
+### Example 4: Batch Process Audio Files to PNG
+```bash
+uv run python audio/create_spectrogram_pngs_parallelized.py \
+    --data-dir /path/to/audio/files \
+    --output-dir ./spectrograms \
+    --jobs 8 \
+    --skip-existing
+```
+
+### Example 5: Process S3 Data (Multi-Core)
+```bash
+uv run python audio_vibration_multi_core.py \
+    --vib-prefix s3://bucket/vibration/path/ \
+    --aud-prefix s3://bucket/audio/path/ \
+    --aws-profile your-profile \
+    --workers 8 \
+    --out-dir ./combined_spectrograms
+```
+
+---
+
+## Detailed Script Reference
+
+### `audio/play_audio_with_spectrogram.py`
 
 **Description:** Interactive real-time audio playback with synchronized spectrogram visualization and moving red cursor. Includes latency compensation for accurate audio-visual alignment. Does not work in the cloud.
 
 **Usage Example:**
 ```bash
-python play_audio_with_spectrogram.py audio_file.wav \
+uv run python audio/play_audio_with_spectrogram.py audio_file.wav \
     --volume 5 \
     --start 10.0 \
     --duration 30.0 \
@@ -98,13 +219,13 @@ python play_audio_with_spectrogram.py audio_file.wav \
 
 ---
 
-### `create_spectrogram_pngs_parallelized.py`
+### `audio/create_spectrogram_pngs_parallelized.py`
 
 **Description:** Efficiently generates spectrogram PNG images from multiple WAV files using parallel processing. Recursively scans directories for audio files.
 
 **Usage Example:**
 ```bash
-python create_spectrogram_pngs_parallelized.py \
+uv run python audio/create_spectrogram_pngs_parallelized.py \
     --data-dir /path/to/audio/directory \
     --output-dir ./output_pngs \
     --nperseg 1024 \
@@ -130,13 +251,13 @@ python create_spectrogram_pngs_parallelized.py \
 
 ---
 
-### `make_mp4_microphone.py`
+### `audio/make_mp4_microphone.py`
 
 **Description:** Creates MP4 videos with synchronized audio and animated spectrogram visualization featuring a moving red playhead. Includes latency compensation and audio synchronization controls.
 
 **Usage Example:**
 ```bash
-python make_mp4_microphone.py audio_file.wav \
+uv run python audio/make_mp4_microphone.py audio_file.wav \
     --frame-dir ./frames_output \
     --fps 30 \
     --width 1280 \
@@ -165,13 +286,13 @@ python make_mp4_microphone.py audio_file.wav \
 
 ---
 
-### `dataloader.py`
+### `misc/dataloader.py`
 
 **Description:** Core module for loading and processing vibration sensor data from compressed `.log.gz` files. Handles thermistor temperature conversion, vibration signal processing, and data interpolation.
 
 **Usage Example:**
 ```python
-from dataloader import DataLoader
+from misc.dataloader import DataLoader
 
 # Load vibration data from .log.gz file
 loader = DataLoader("20250915_150037.log.gz")
@@ -197,13 +318,13 @@ channel_0 = vib_data[:, 0]
 
 ---
 
-### `play_vibration_with_spectrogram.py`
+### `vibration/play_vibration_with_spectrogram.py`
 
 **Description:** Interactive real-time vibration playback with synchronized spectrogram visualization. Similar to audio player but designed for vibration sensor data from `.log.gz` files. Does not work in the cloud. 
 
 **Usage Example:**
 ```bash
-python play_vibration_with_spectrogram.py /path/to/20250915_150037.log.gz \
+uv run python vibration/play_vibration_with_spectrogram.py /path/to/20250915_150037.log.gz \
     --channel 0 \
     --normalize \
     --volume 2.0 \
@@ -228,13 +349,13 @@ python play_vibration_with_spectrogram.py /path/to/20250915_150037.log.gz \
 
 ---
 
-### `make_mp4_vibration.py`
+### `vibration/make_mp4_vibration.py`
 
 **Description:** Creates MP4 videos from vibration sensor data with animated spectrogram visualization. Generates frames with moving playhead and muxes with audio using ffmpeg.
 
 **Usage Example:**
 ```bash
-python make_mp4_vibration.py input.log.gz \
+uv run python vibration/make_mp4_vibration.py input.log.gz \
     --channel 0 \
     --frame-dir ./frames_out \
     --fps 30 \
@@ -263,13 +384,13 @@ python make_mp4_vibration.py input.log.gz \
 
 ---
 
-### `save_vibration_pngs.py`
+### `vibration/save_vibration_pngs.py`
 
 **Description:** Batch processes vibration sensor logs from S3, generating spectrogram PNG images with parallel processing. Supports time-domain plots and configurable spectrogram parameters.
 
 **Usage Example:**
 ```bash
-python save_vibration_pngs.py \
+uv run python vibration/save_vibration_pngs.py \
     --s3-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-3/data/daq/20250911/ \
     --output-dir vibration_spectrograms \
     --no-time-domain \
@@ -300,13 +421,13 @@ ffmpeg -framerate 30 -pattern_type glob -i '*_spec.png' \
 
 ---
 
-### `save_sensor_data.py`
+### `misc/save_sensor_data.py`
 
 **Description:** Downloads paired vibration and audio files from S3 based on timestamp overlap. Filters by time range and organizes files into timestamped subfolders.
 
 **Usage Example:**
 ```bash
-python save_sensor_data.py \
+uv run python misc/save_sensor_data.py \
     --vib-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-2/data/daq/20250922/ \
     --aud-prefix "s3://bai-mgmt-uw2-sandbox-cip-field-data/site=Permian/facility=Scat Daddy/device_id=cip-gas-2/data_type=audio/year=2025/month=09/day=22/" \
     --aws-profile bai-mgmt-gbl-sandbox-developer \
@@ -330,13 +451,13 @@ python save_sensor_data.py \
 
 ---
 
-### `audio_vibration_single_core.py`
+### `misc/audio_vibration_single_core.py`
 
 **Description:** Single-core processor that lists audio and vibration files from S3, computes timestamp overlaps, and generates combined spectrograms. Useful for smaller datasets or debugging.
 
 **Usage Example:**
 ```bash
-python audio_vibration_single_core.py \
+uv run python misc/audio_vibration_single_core.py \
     --vib-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-2/data/daq/20250922/ \
     --aud-prefix "s3://bai-mgmt-uw2-sandbox-cip-field-data/site=Permian/facility=Scat Daddy/device_id=cip-gas-2/data_type=audio/year=2025/month=09/day=22/" \
     --aws-profile bai-mgmt-gbl-sandbox-developer \
@@ -363,7 +484,7 @@ python audio_vibration_single_core.py \
 
 **Usage Example:**
 ```bash
-python audio_vibration_multi_core.py \
+uv run python audio_vibration_multi_core.py \
     --vib-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-2/data/daq/20250922/ \
     --aud-prefix "s3://bai-mgmt-uw2-sandbox-cip-field-data/site=Permian/facility=Scat Daddy/device_id=cip-gas-2/data_type=audio/year=2025/month=09/day=22/" \
     --aws-profile bai-mgmt-gbl-sandbox-developer \
@@ -396,45 +517,62 @@ python audio_vibration_multi_core.py \
 ### Workflow 1: Audio Analysis
 ```bash
 # 1. Preview audio interactively
-python play_audio_with_spectrogram.py sample.wav --volume 5
+uv run python audio/play_audio_with_spectrogram.py sample.wav --volume 5
 
 # 2. Generate spectrograms for all audio files
-python create_spectrogram_pngs_parallelized.py \
-    --data-dir ./audio --output-dir ./pngs --jobs 8
+uv run python audio/create_spectrogram_pngs_parallelized.py \
+    --data-dir ./audio_files --output-dir ./pngs --jobs 8
 
 # 3. Create presentation video
-python make_mp4_microphone.py sample.wav --frame-dir ./frames --fps 30 --volume 5
+uv run python audio/make_mp4_microphone.py sample.wav \
+    --frame-dir ./frames --fps 30 --volume 5
 ```
 
 ### Workflow 2: Vibration Analysis
 ```bash
 # 1. Preview vibration data
-python play_vibration_with_spectrogram.py data.log.gz --channel 0 --volume 2
+uv run python vibration/play_vibration_with_spectrogram.py data.log.gz \
+    --channel 0 --volume 2
 
 # 2. Generate vibration spectrograms from S3
-python save_vibration_pngs.py \
+uv run python vibration/save_vibration_pngs.py \
     --s3-prefix s3://bucket/path/ --output-dir ./vib_pngs --workers 16
 
 # 3. Create video from vibration data
-python make_mp4_vibration.py data.log.gz --channel 0 --frame-dir ./frames
+uv run python vibration/make_mp4_vibration.py data.log.gz \
+    --channel 0 --frame-dir ./frames
 ```
 
 ### Workflow 3: Combined Audio & Vibration Processing
 ```bash
 # 1. Download paired sensor data from S3
-python save_sensor_data.py \
+uv run python misc/save_sensor_data.py \
     --vib-prefix s3://bucket/vibration/ \
     --aud-prefix s3://bucket/audio/ \
     --out-dir ./paired_data \
     --start-ts 20250922160000 \
     --end-ts 20250922180000
 
-# 2. Generate combined spectrograms
-python audio_vibration_multi_core.py \
+# 2. Generate combined spectrograms (multi-core)
+uv run python audio_vibration_multi_core.py \
     --vib-prefix s3://bucket/vibration/ \
     --aud-prefix s3://bucket/audio/ \
     --out-dir ./combined_specs \
     --workers 8
+```
+
+### Workflow 4: Development and Testing
+```bash
+# 1. Run unit tests
+uv run python misc/unit_test.py
+
+# 2. Test MP4 generation
+uv run python misc/test_mp4_generation.py
+
+# 3. Single-core processing for debugging
+uv run python misc/audio_vibration_single_core.py \
+    --vib-prefix s3://bucket/vibration/ \
+    --aud-prefix s3://bucket/audio/
 ```
 
 ## Technical Details
