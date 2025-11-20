@@ -27,7 +27,6 @@ import boto3
 from botocore.config import Config
 import numpy as np
 import soundfile as sf
-import sounddevice as sd
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram
 
@@ -371,6 +370,9 @@ def estimate_output_latency(fs: int, channels: int, mode: str) -> float:
     Returns:
         Estimated latency in seconds
     """
+    # Import sounddevice only when needed (requires PortAudio system library)
+    import sounddevice as sd
+    
     try:
         return float(mode)
     except ValueError:
