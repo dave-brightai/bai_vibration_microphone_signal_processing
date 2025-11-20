@@ -423,9 +423,8 @@ def plot_spectrogram_and_save(
     x: np.ndarray,
     fs: float,
     out_png: Path,
-    nperseg: int = 1024,
-    noverlap: int = 512,
-    nfft: int = 1024,
+    nperseg: int = 4096,
+    noverlap: int = 3585,
     dpi: int = 300,
     title: str | None = None,
     vmin: float | None = None,
@@ -438,16 +437,15 @@ def plot_spectrogram_and_save(
         x: Input signal (1D array)
         fs: Sample rate in Hz
         out_png: Output PNG file path
-        nperseg: STFT window length in samples (default: 1024)
-        noverlap: STFT overlap in samples (default: 512)
-        nfft: FFT size (default: 1024)
+        nperseg: STFT window length in samples (default: 4096)
+        noverlap: STFT overlap in samples (default: 3585)
         dpi: Output resolution (default: 300)
         title: Plot title (optional)
         vmin: Minimum dB value for color scale (optional)
         vmax: Maximum dB value for color scale (optional)
     """
     f, t, Sxx = spectrogram(
-        x, fs=fs, nperseg=nperseg, noverlap=noverlap, nfft=nfft,
+        x, fs=fs, nperseg=nperseg, noverlap=noverlap,
         scaling="spectrum", mode="magnitude"
     )
 

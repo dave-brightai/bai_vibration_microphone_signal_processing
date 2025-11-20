@@ -222,7 +222,6 @@ def save_spectrogram_png(
     dpi: int,
     nperseg: int,
     noverlap: int,
-    nfft: Optional[int],
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
@@ -245,10 +244,9 @@ def save_spectrogram_png(
         mono = data[:, ch]
         seg = int(min(nperseg, len(mono)))
         ovl = int(min(noverlap, max(seg - 1, 0)))
-        nfft_use = int(nfft) if nfft is not None else None
 
         f, t, Sxx = spectrogram(
-            mono, fs=float(fs), nperseg=seg, noverlap=ovl, nfft=nfft_use,
+            mono, fs=float(fs), nperseg=seg, noverlap=ovl,
             scaling="spectrum", mode="magnitude"
         )
         Sxx = Sxx.astype(np.float32, copy=False)
@@ -279,7 +277,6 @@ def process_one(
     make_spectro: bool,
     nperseg: int,
     noverlap: int,
-    nfft: Optional[int],
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
@@ -308,7 +305,7 @@ def process_one(
         if make_spectro and fs:
             spec_out = save_spectrogram_png(
                 fn, vib_data, float(fs), out_dir, dpi,
-                nperseg, noverlap, nfft, cmap, vmin, vmax
+                nperseg, noverlap, cmap, vmin, vmax
             )
 
         del vib_data, t, data_obj
@@ -384,7 +381,6 @@ def main(
     make_spectro: bool,
     nperseg: int,
     noverlap: int,
-    nfft: Optional[int],
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
@@ -418,7 +414,7 @@ def main(
                 i += 1
                 fut = ex.submit(
                     process_one, fn, output_dir, dpi, aws_profile,
-                    make_time, make_spectro, nperseg, noverlap, nfft, cmap, vmin, vmax
+                    make_time, make_spectro, nperseg, noverlap, cmap, vmin, vmax
                 )
                 try:
                     _, time_name, spec_name = fut.result()
@@ -449,7 +445,7 @@ def main(
             def submit_one(fn_):
                 fut = ex.submit(
                     process_one, fn_, output_dir, dpi, aws_profile,
-                    make_time, make_spectro, nperseg, noverlap, nfft, cmap, vmin, vmax
+                    make_time, make_spectro, nperseg, noverlap, cmap, vmin, vmax
                 )
                 in_flight[fut] = fn_
 
@@ -527,7 +523,6 @@ if __name__ == "__main__":
     spec.set_defaults(make_spectro=True)
     spec.add_argument("--nperseg", type=int, default=4096)
     spec.add_argument("--noverlap", type=int, default=3585)
-    spec.add_argument("--nfft", type=int, default=None)
     spec.add_argument("--cmap", type=str, default="viridis")
     spec.add_argument("--vmin", type=float, default=-80.0)
     spec.add_argument("--vmax", type=float, default=-20.0)
@@ -552,7 +547,6 @@ if __name__ == "__main__":
         make_spectro=args.make_spectro,
         nperseg=args.nperseg,
         noverlap=args.noverlap,
-        nfft=args.nfft,
         cmap=args.cmap,
         vmin=args.vmin,
         vmax=args.vmax,

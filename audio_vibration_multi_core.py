@@ -14,10 +14,10 @@ python audio_vibration_multi_core.py \
   --workers 4 \
   --max-pending 16 \
   --out-dir combined_specs_test \
-  --nperseg 1024 --noverlap 512 --nfft 4096 \
+  --nperseg 4096 --noverlap 3585 \
   --vmin -60 --vmax -20
 
-python audio_vibration_multi_core.py --vib-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-2/data/daq/20250922/ --aud-prefix "s3://bai-mgmt-uw2-sandbox-cip-field-data/site=Permian/facility=Scat Daddy/device_id=cip-gas-2/data_type=audio/year=2025/month=09/day=22/" --aws-profile bai-mgmt-gbl-sandbox-developer --workers 4 --max-pending 16 --out-dir combined_specs_test --nperseg 1024 --noverlap 512 --nfft 4096 --vmin -60 --vmax -20
+python audio_vibration_multi_core.py --vib-prefix s3://bai-mgmt-uw2-sandbox-cip-field-data/cip-daq-2/data/daq/20250922/ --aud-prefix "s3://bai-mgmt-uw2-sandbox-cip-field-data/site=Permian/facility=Scat Daddy/device_id=cip-gas-2/data_type=audio/year=2025/month=09/day=22/" --aws-profile bai-mgmt-gbl-sandbox-developer --workers 4 --max-pending 16 --out-dir combined_specs_test --nperseg 4096 --noverlap 3585 --vmin -60 --vmax -20
 
 
 """
@@ -124,7 +124,6 @@ def _process_pair(
     out_dir: str,
     nperseg: int,
     noverlap: int,
-    nfft: Optional[int],
     dpi: int,
     cmap: str,
     vmin: Optional[float],
@@ -149,7 +148,7 @@ def _process_pair(
             vib_label=vib_fn, vib_data=vib_data, vib_fs=vib_fs,
             aud_label=aud_fn, aud_data=aud_data, aud_fs=aud_fs,
             out_png=out_png,
-            nperseg=nperseg, noverlap=noverlap, nfft=nfft,
+            nperseg=nperseg, noverlap=noverlap, nfft=None,
             dpi=dpi, cmap=cmap, vmin=vmin, vmax=vmax,
         )
         return vib_fn, str(out_path)
@@ -175,9 +174,8 @@ def main(
     max_pending: int = 128,
     out_dir: str = "combined_specs",
     dpi: int = 300,
-    nperseg: int = 1024,
-    noverlap: int = 512,
-    nfft: Optional[int] = 4096,
+    nperseg: int = 4096,
+    noverlap: int = 3585,
     cmap: str = "viridis",
     vmin: float = -60.0,
     vmax: float = -20.0,
@@ -268,7 +266,6 @@ def main(
                     out_dir=out_dir,
                     nperseg=nperseg,
                     noverlap=noverlap,
-                    nfft=nfft,
                     dpi=dpi,
                     cmap=cmap,
                     vmin=vmin,
@@ -308,7 +305,6 @@ def main(
                     out_dir=out_dir,
                     nperseg=nperseg,
                     noverlap=noverlap,
-                    nfft=nfft,
                     dpi=dpi,
                     cmap=cmap,
                     vmin=vmin,
@@ -386,9 +382,8 @@ if __name__ == "__main__":
         help="Directory to write combined PNGs",
     )
     p.add_argument("--dpi", type=int, default=300)
-    p.add_argument("--nperseg", type=int, default=1024)
-    p.add_argument("--noverlap", type=int, default=512)
-    p.add_argument("--nfft", type=int, default=4096)
+    p.add_argument("--nperseg", type=int, default=4096)
+    p.add_argument("--noverlap", type=int, default=3585)
     p.add_argument("--cmap", default="viridis")
     p.add_argument("--vmin", type=float, default=-60.0)
     p.add_argument("--vmax", type=float, default=-20.0)
@@ -415,7 +410,6 @@ if __name__ == "__main__":
         dpi=args.dpi,
         nperseg=args.nperseg,
         noverlap=args.noverlap,
-        nfft=args.nfft,
         cmap=args.cmap,
         vmin=args.vmin,
         vmax=args.vmax,

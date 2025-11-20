@@ -7,7 +7,7 @@ Usage:
     --data-dir /path/to/cip-gas1 \
     --output-dir ./spectrogram_pngs \
     --k 20 \
-    --nperseg 1024 --noverlap 512 --nfft 1024 \
+    --nperseg 4096 --noverlap 3585 \
     --vmin -120 --vmax -20 \
     --dpi 300 \
     --jobs 8
@@ -46,9 +46,8 @@ parser = argparse.ArgumentParser(description="Generate spectrogram PNGs for WAV 
 parser.add_argument("--data-dir", required=True, type=str, help="Root directory containing WAV files.")
 parser.add_argument("--output-dir", required=True, type=str, help="Directory to save spectrogram PNGs.")
 parser.add_argument("--k", type=int, default=20, help="Number of initial samples to drop from each signal.")
-parser.add_argument("--nperseg", type=int, default=1024, help="STFT window length (samples).")
-parser.add_argument("--noverlap", type=int, default=512, help="STFT overlap (samples).")
-parser.add_argument("--nfft", type=int, default=4096, help="FFT size.")
+parser.add_argument("--nperseg", type=int, default=4096, help="STFT window length (samples).")
+parser.add_argument("--noverlap", type=int, default=3585, help="STFT overlap (samples).")
 parser.add_argument("--dpi", type=int, default=300, help="Output PNG DPI.")
 parser.add_argument("--vmin", type=float, default=-15, help="Minimum dB value for color scale (optional).")
 parser.add_argument("--vmax", type=float, default=-60, help="Maximum dB value for color scale (optional).")
@@ -78,7 +77,6 @@ def _process_one(
     k: int,
     nperseg: int,
     noverlap: int,
-    nfft: int,
     dpi: int,
     vmin: float | None,
     vmax: float | None,
@@ -103,7 +101,6 @@ def _process_one(
             out_png,
             nperseg=nperseg,
             noverlap=noverlap,
-            nfft=nfft,
             dpi=dpi,
             title=title,
             vmin=vmin,
@@ -144,8 +141,7 @@ def main():
                     args.k,
                     args.nperseg,
                     args.noverlap,
-                    args.nfft,
-                    args.dpi,
+                    args.vmin,
                     args.vmin,
                     args.vmax,
                     args.skip_existing,

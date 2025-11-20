@@ -68,8 +68,8 @@ def save_frames(args):
     # ---- Spectrogram (mono) ----
     mono = data[:, 0]
     f, t, Sxx = spectrogram(
-        mono, fs=fs, nperseg=args.nperseg, noverlap=args.noverlap,
-        nfft=args.nfft, scaling="spectrum", mode="magnitude"
+        fs=fs, nperseg=args.nperseg, noverlap=args.noverlap,
+        scaling="spectrum", mode="magnitude"
     )
     Sxx_db = 10.0 * np.log10(Sxx + np.finfo(float).eps)
 
@@ -192,9 +192,8 @@ def parse_args():
     p.add_argument("--vmin", type=float, default=-60.0, help="Spectrogram min dB")
     p.add_argument("--vmax", type=float, default=-15.0, help="Spectrogram max dB")
     p.add_argument("--cmap", type=str, default="viridis", help="Matplotlib colormap name")
-    p.add_argument("--nperseg", type=int, default=1024, help="STFT window size")
-    p.add_argument("--noverlap", type=int, default=512, help="STFT overlap")
-    p.add_argument("--nfft", type=int, default=4096, help="FFT size for higher frequency resolution")
+    p.add_argument("--nperseg", type=int, default=4096, help="STFT window size")
+    p.add_argument("--noverlap", type=int, default=3585, help="STFT overlap")
     p.add_argument("--start", type=float, default=0.0, help="Start time (s) within the WAV")
     p.add_argument("--duration", type=float, default=-1.0, help="Duration (s, -1 = full file)")
 

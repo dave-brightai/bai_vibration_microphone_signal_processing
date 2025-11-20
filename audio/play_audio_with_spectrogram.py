@@ -70,7 +70,6 @@ def play_with_spectrogram(args):
         fs=fs,
         nperseg=args.nperseg,
         noverlap=args.noverlap,
-        nfft=args.nfft,
         scaling="spectrum",
         mode="magnitude",
     )
@@ -153,9 +152,8 @@ def parse_args():
     p.add_argument("wav", type=str, help="Path to WAV (or any file libsndfile can read)")
     p.add_argument("--start", type=float, default=0.0, help="Start playback at this many seconds")
     p.add_argument("--duration", type=float, default=-1.0, help="Play for this many seconds (-1 = full)")
-    p.add_argument("--nperseg", type=int, default=1024, help="Spectrogram window size")
-    p.add_argument("--noverlap", type=int, default=512, help="Spectrogram overlap")
-    p.add_argument("--nfft", type=int, default=4096, help="FFT size for higher frequency resolution")
+    p.add_argument("--nperseg", type=int, default=4096, help="Spectrogram window size")
+    p.add_argument("--noverlap", type=int, default=3585, help="Spectrogram overlap")
     p.add_argument("--cmap", type=str, default="viridis", help="Colormap for spectrogram")
     p.add_argument("--vmin", type=float, default=-60.0, help="Spectrogram minimum dB value")
     p.add_argument("--vmax", type=float, default=-15.0, help="Spectrogram maximum dB value")
