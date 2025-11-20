@@ -37,8 +37,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import boto3
+from botocore.config import Config
 from scipy.signal import spectrogram
-from cloudpathlib import CloudPath, S3Client
 
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from concurrent.futures.process import BrokenProcessPool
@@ -77,21 +77,6 @@ def _worker_initializer(core_hint: Optional[int] = None):
 
 # ---------- S3 helpers ----------
 # parse_s3_uri moved to utils.py
-
-def list_s3_files_cloudpath(prefix_uri: str, aws_profile: Optional[str] = None, pattern: str = "*.log.gz") -> list[str]:
-    """
-    Recursively list files under an s3:// prefix using cloudpathlib and a glob pattern
-    (default: '*.log.gz'), mirroring: list((path/<subdir>).rglob('*.log.gz')).
-    """
-    # Build cloudpathlib S3 client from a boto3 Session (respects profile)
-    session = boto3.Session(profile_name=aws_profile) if aws_profile else boto3.Session()
-    client = S3Client(boto3_session=session)
-
-    # Ensure trailing slash so rglob walks "under" the prefix
-    root: CloudPath = client.CloudPath(prefix_uri.rstrip("/") + "/")
-
-    # rglob returns CloudPath objects; convert to string s3:// URIs
-    return [str(p) for p in root.rglob(pattern) if p.is_file()]
 
 def synthesize_s3_files(
     prefix_uri: str,
@@ -343,8 +328,9 @@ def iter_sources(
     if s3_uris_file:
         out.extend(read_lines_file(s3_uris_file))
     if s3_prefix:
-        print(f"Listing via cloudpathlib rglob: {s3_prefix}")
-        out.extend(list_s3_files_cloudpath(s3_prefix, aws_profile, pattern="*.log.gz"))
+        from utils import list_s3_files_fast
+        print(f"Listing S3 files: {s3_prefix}")
+        out.extend(list_s3_files_fast(s3_prefix, aws_profile=aws_profile, pattern="*.log.gz"))
     if s3_synthesize:
         print(f"Synthesizing S3 keys under: {s3_synthesize}  [00:00:00..23:59:59 step {synth_step}s]")
         out.extend(
